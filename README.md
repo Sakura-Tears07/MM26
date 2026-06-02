@@ -16,8 +16,8 @@ KDE / GMM / 条件 Diffusion 在四类 2D 分布上的采样与密度拟合对�
 ```bash
 conda activate MM26
 pip install -r requirements.txt
-python generate_data.py              # 默认 train 16000 / test 8000
-python generate_data.py --plot
+python generate_data.py --force      # 覆盖 data/*.npy，默认 train 16000 / test 8000
+python generate_data.py --force --plot
 ```
 
 等价于：`python generate_data.py --train-per-class 4000 --test-per-class 2000`
@@ -27,17 +27,17 @@ python generate_data.py --plot
 ## 命令
 
 ```bash
-# 主实验
-python run_main.py --data-dir data --output-dir outputs \
+# 主实验（--force：重训并覆盖 outputs/ 下 checkpoint、samples、metrics、figures）
+python run_main.py --force --data-dir data --output-dir outputs \
   --epochs 400 --batch-size 32 --gpus 8 --device cuda --compile
 
-# 拓展
-python ext_conditional.py --checkpoint outputs/checkpoints/diffusion.pt --device cuda
-python ext_sweep.py --gpus 8 --device cuda --compile    # 读 sweep_grid.json，18 组
-python ext_robustness.py --main-output-dir outputs --ratios 0 0.01 0.05 0.1 --gpus 8 --device cuda --compile
+# 拓展（均带 --force，忽略已有结果并覆盖输出目录）
+python ext_conditional.py --force --checkpoint outputs/checkpoints/diffusion.pt --device cuda
+python ext_sweep.py --force --gpus 8 --device cuda --compile    # sweep_grid.json，18 组
+python ext_robustness.py --force --main-output-dir outputs --ratios 0 0.01 0.05 0.1 --gpus 8 --device cuda --compile
 ```
 
-修改扫描维：编辑 `sweep_grid.json`。换新网格后建议 `python ext_sweep.py --force ...` 并清空旧 `outputs/ext_sweep/trial_*`（可选）。
+修改扫描维：编辑 `sweep_grid.json` 后同样加 `--force` 重跑；旧 `outputs/ext_sweep/trial_*` 会被各 trial 新结果覆盖（目录名不变时建议先删再扫，避免残留）。
 
 ---
 

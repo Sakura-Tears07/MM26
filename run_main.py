@@ -29,6 +29,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--class-emb-dim", type=int, default=cfg.DIFFUSION_CLASS_EMB_DIM)
     p.add_argument("--gpus", type=int, default=8)
     p.add_argument("--device", type=str, default="cuda")
+    p.add_argument("--force", action="store_true", help="重训并覆盖 output-dir 下已有 checkpoint / metrics / samples")
     p.add_argument("--skip-train", action="store_true")
     p.add_argument("--eval-only", action="store_true")
     p.add_argument("--no-figures", action="store_true")
@@ -41,7 +42,9 @@ def main() -> None:
     root = Path(__file__).resolve().parent
     py = sys.executable
 
-    if not args.eval_only and not args.skip_train:
+    skip_train = args.skip_train and not args.force
+    eval_only = args.eval_only and not args.force
+    if not eval_only and not skip_train:
         run(
             [py, "train_baselines.py", "--data-dir", str(args.data_dir), "--output-dir", str(args.output_dir), "--seed", str(args.seed)],
             cwd=root,

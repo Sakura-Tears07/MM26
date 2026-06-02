@@ -133,7 +133,7 @@ def main() -> None:
 
         log(f"[{run_idx}/{len(valid)}] {suffix}")
 
-        if not args.eval_only and not ckpt.exists():
+        if not args.eval_only and (args.force or not ckpt.exists()):
             cmd = [
                 "torchrun" if args.gpus > 1 else sys.executable,
                 *(

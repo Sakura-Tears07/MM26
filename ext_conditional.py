@@ -24,6 +24,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--samples-per-class", type=int, default=0, help="0 表示与 test 集每类数量一致")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--device", type=str, default="cuda")
+    p.add_argument("--force", action="store_true", help="覆盖 output-dir 下已有评估结果与样本")
     return p.parse_args()
 
 

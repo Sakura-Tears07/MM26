@@ -160,6 +160,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hidden-per-class", type=int, default=2000)
     parser.add_argument("--seed", type=int, default=20260525)
     parser.add_argument("--plot", action="store_true", help="save data/preview.png")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="覆盖 output-dir 下已有 .npy / metadata.json（默认即覆盖，显式写出便于与 README 一致）",
+    )
     return parser.parse_args()
 
 
