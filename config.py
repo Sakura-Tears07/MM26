@@ -40,6 +40,9 @@ FILE_EVAL_HIDDEN = "evaluation_hidden_test.json"
 FILE_EVAL_HIDDEN_CSV = "evaluation_hidden_test.csv"
 ALIAS_MAIN_EVAL = "main_evaluation.json"
 ALIAS_HIDDEN_EVAL = "hidden_test_evaluation.json"
+# --diffusion-only 专用，勿覆盖主实验三模型别名
+FILE_DIFFUSION_ONLY_TEST = "diffusion_only_evaluation.json"
+FILE_DIFFUSION_ONLY_HIDDEN = "diffusion_only_hidden_test_evaluation.json"
 
 # 拓展汇总别名
 ALIAS_CONDITIONAL_EVAL = "conditional_evaluation.json"
@@ -53,6 +56,11 @@ KDE_NLL_BW_SPIRAL = 0.10
 KDE_NLL_BW_DEFAULT = 0.12
 MAX_METRIC_SAMPLES = 2000
 WASSERSTEIN_MAX_SAMPLES = 512
+
+# ---------------------------------------------------------------------------
+# 分布式训练默认 GPU 数（torchrun --nproc_per_node）
+# ---------------------------------------------------------------------------
+DEFAULT_GPUS = 4
 
 # ---------------------------------------------------------------------------
 # Diffusion 训练默认（spiral 过采样见 DIFFUSION_SPIRAL_OVERSAMPLE）

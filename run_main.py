@@ -32,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--num-steps", type=int, default=cfg.DIFFUSION_NUM_STEPS)
     p.add_argument("--hidden-dim", type=int, default=cfg.DIFFUSION_HIDDEN_DIM)
     p.add_argument("--class-emb-dim", type=int, default=cfg.DIFFUSION_CLASS_EMB_DIM)
-    p.add_argument("--gpus", type=int, default=8)
+    p.add_argument("--gpus", type=int, default=cfg.DEFAULT_GPUS)
     p.add_argument("--device", type=str, default="cuda")
     p.add_argument("--force", action="store_true")
     p.add_argument("--skip-train", action="store_true")

@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--diffusion-only",
         action="store_true",
-        help="仅评估 Diffusion（不要求 kde.pkl / gmm.pkl）",
+        help="仅评估 Diffusion；写入 diffusion_only_*.json，不覆盖 main_evaluation.json",
     )
     return p.parse_args()
 
@@ -85,9 +85,14 @@ def run_split_diffusion_only(
     )
     all_metrics = {"diffusion": result}
     table_rows = [{"model": "diffusion", "class": k, **v} for k, v in result.items()]
-    json_name = cfg.FILE_EVAL_TEST if split == "test" else cfg.FILE_EVAL_HIDDEN
-    csv_name = cfg.FILE_EVAL_TEST_CSV if split == "test" else cfg.FILE_EVAL_HIDDEN_CSV
-    alias = cfg.ALIAS_MAIN_EVAL if split == "test" else cfg.ALIAS_HIDDEN_EVAL
+    if split == "test":
+        json_name = cfg.FILE_DIFFUSION_ONLY_TEST
+        csv_name = "diffusion_only_evaluation.csv"
+        alias = None
+    else:
+        json_name = cfg.FILE_DIFFUSION_ONLY_HIDDEN
+        csv_name = "diffusion_only_hidden_test_evaluation.csv"
+        alias = None
     path = save_metrics_bundle(metrics_dir, all_metrics, table_rows, json_name=json_name, csv_name=csv_name, alias_name=alias)
     log(f"指标: {path}")
 

@@ -28,32 +28,44 @@ python generate_data.py --force --plot   # 可选 preview
 |------|------|
 | `generate_data.py` | 生成 `data/` |
 | `train.py` | `baselines` / `diffusion` |
-| `evaluate.py` | 评估（`--diffusion-only` 可只评 Diffusion） |
+| `evaluate.py` | 三模型评估；`--diffusion-only` 写入独立 JSON，不覆盖主结果 |
 | `run_main.py` | 主实验：三模型训练 + test/hidden 评估 |
 | `extensions.py` | `conditional` / `sweep` / `robustness` |
 
 ```bash
 # 主实验（产物一律写入 outputs/，见下方目录表）
-python run_main.py --force --gpus 8 --device cuda --compile
+python run_main.py --force --gpus 4 --device cuda --compile
 
 python evaluate.py --split test hidden_test --device cuda
 
 # 拓展
 python extensions.py conditional --force --device cuda
-python extensions.py sweep --force --gpus 8 --device cuda --compile
-python extensions.py robustness --force --ratios 0 0.01 0.05 0.1 --gpus 8 --device cuda --compile
+python extensions.py sweep --force --gpus 4 --device cuda --compile
+python extensions.py robustness --force --ratios 0 0.01 0.05 0.1 --gpus 4 --device cuda --compile
 ```
 
 仅重训 Diffusion（仍写入 `outputs/checkpoints/diffusion.pt`）：
 
 ```bash
-torchrun --standalone --nproc_per_node 8 train.py diffusion \
+torchrun --standalone --nproc_per_node 4 train.py diffusion \
   --data-dir data --output-dir outputs \
   --epochs 400 --compile --spiral-oversample 2
 python evaluate.py --diffusion-only --split test hidden_test --device cuda
+# 产物：metrics/diffusion_only_evaluation.json（不覆盖 main_evaluation.json）
 ```
 
 超参与路径默认值见 `config.py`。
+
+### 原始 Diffusion vs 改进版（报告务必区分）
+
+| 版本 | 典型 spiral precision (test) | 说明 |
+|------|------------------------------|------|
+| 原始 | ~0.618 | 默认 MLP + linear schedule；spiral 易呈圆盘状 |
+| 改进版 | ~0.841 | `resfourier_v3`、`cosine`、后验方差、`spiral_oversample=2`、`spiral_loss_weight=2.0`、`num_steps=500` |
+
+改进版主实验 macro precision ≈ **0.930**，macro MMD ≈ **0.000328**；coverage ≈ **0.918** 仍低于 KDE/GMM，生成分布偏保守。
+
+`sweep/` 为**原始 Diffusion 超参扫描**（旧网络与训练默认），勿与改进版主 checkpoint 混比。`conditional/`、`robustness/ratio_0` 须用 `outputs/checkpoints/diffusion.pt`（改进版）重跑后写入报告。
 
 ---
 
@@ -80,8 +92,10 @@ outputs/
 | 文件 | 说明 |
 |------|------|
 | `metrics/evaluation.json` | test 三模型指标 |
-| `metrics/main_evaluation.json` | 同上（提交用别名） |
-| `metrics/evaluation_hidden_test.json` | hidden_test |
+| `metrics/main_evaluation.json` | test 三模型（kde + gmm + diffusion） |
+| `metrics/diffusion_only_evaluation.json` | 仅 Diffusion 的快速评估 |
+| `metrics/evaluation_hidden_test.json` | hidden_test 三模型 |
+| `metrics/diffusion_only_hidden_test_evaluation.json` | hidden_test 仅 Diffusion |
 | `metrics/diffusion_train_summary.json` | Diffusion 训练配置摘要 |
 | `conditional/conditional_evaluation.json` | 条件生成指标 |
 | `sweep/sweep_summary.json` | 扫描汇总别名 |
