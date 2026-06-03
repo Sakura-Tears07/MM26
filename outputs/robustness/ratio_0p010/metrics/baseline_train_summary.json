@@ -1,0 +1,16 @@
+{
+  "kde_checkpoint": "/home/lhr/my_stuff/MM26/outputs/ext_robustness/ratio_0p010/outputs/checkpoints/kde.pkl",
+  "gmm_checkpoint": "/home/lhr/my_stuff/MM26/outputs/ext_robustness/ratio_0p010/outputs/checkpoints/gmm.pkl",
+  "kde_best_bandwidth": {
+    "0": 0.05,
+    "1": 0.05,
+    "2": 0.05,
+    "3": 0.03
+  },
+  "gmm_best_components": {
+    "0": 10,
+    "1": 10,
+    "2": 12,
+    "3": 36
+  }
+}

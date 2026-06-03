@@ -7,6 +7,29 @@ from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cdist
 from sklearn.neighbors import KernelDensity
 
+import config as cfg
+
+
+def generated_kde_bandwidth(label: int) -> float:
+    return cfg.KDE_NLL_BW_SPIRAL if label == cfg.SPIRAL_LABEL else cfg.KDE_NLL_BW_DEFAULT
+
+
+def subsample_pair(
+    real_x: np.ndarray,
+    gen_x: np.ndarray,
+    max_samples: int,
+    seed: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    if max_samples <= 0:
+        return real_x, gen_x
+    n = min(len(real_x), len(gen_x), max_samples)
+    if len(real_x) == n and len(gen_x) == n:
+        return real_x, gen_x
+    rng = np.random.default_rng(seed)
+    idx_r = rng.choice(len(real_x), n, replace=len(real_x) < n)
+    idx_g = rng.choice(len(gen_x), n, replace=len(gen_x) < n)
+    return real_x[idx_r], gen_x[idx_g]
+
 
 def _median_heuristic_bandwidth(x: np.ndarray, y: np.ndarray) -> float:
     merged = np.concatenate([x, y], axis=0)
@@ -126,10 +149,14 @@ def compute_all_metrics(
     nll: float | None = None,
     include_mode_coverage: bool = False,
     seed: int = 42,
+    max_metric_samples: int = cfg.MAX_METRIC_SAMPLES,
 ) -> dict[str, float]:
+    real_x, gen_x = subsample_pair(real_x, gen_x, max_metric_samples, seed)
     out = {
         "mmd": mmd_rbf(real_x, gen_x),
-        "wasserstein": wasserstein_distance(real_x, gen_x, seed=seed),
+        "wasserstein": wasserstein_distance(
+            real_x, gen_x, max_samples=cfg.WASSERSTEIN_MAX_SAMPLES, seed=seed
+        ),
         "swd": sliced_wasserstein_distance(real_x, gen_x, seed=seed),
         "coverage": coverage_score(real_x, gen_x),
         "precision": precision_score(real_x, gen_x),

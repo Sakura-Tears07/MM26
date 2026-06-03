@@ -1,0 +1,5 @@
+{
+  "outlier_ratio": 0.05,
+  "outlier_range": 8.0,
+  "seed": 42
+}

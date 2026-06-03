@@ -5,8 +5,10 @@ __pycache__/
 *.egg-info/
 .venv/
 
-# 实验产物与数据（本地 generate_data.py 生成）
-outputs/
+# 主实验产物 outputs/ 已纳入版本库；勿提交临时目录与日志
+outputs_v2/
+outputs_spiral/
+*.log
 data/*.npy
 data/figures/
 data/preview.png

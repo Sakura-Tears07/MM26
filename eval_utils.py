@@ -1,13 +1,28 @@
 from __future__ import annotations
 
+import csv
+import json
+import shutil
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-from data_utils import CLASS_NAMES, class_counts, load_dataset
+import config as cfg
+from data_utils import CLASS_NAMES, class_counts, get_eval_split, load_dataset
 from diffusion_model import ConditionalDiffusion2D
-from metrics import compute_all_metrics, macro_average, negative_log_likelihood_kde_on_generated
+from metrics import (
+    compute_all_metrics,
+    generated_kde_bandwidth,
+    macro_average,
+    negative_log_likelihood_kde_on_generated,
+)
+
+
+def kde_nll_on_generated(label: int, real: np.ndarray, fake: np.ndarray) -> float:
+    return negative_log_likelihood_kde_on_generated(
+        real, fake, bandwidth=generated_kde_bandwidth(label)
+    )
 
 
 def evaluate_by_class(
@@ -19,6 +34,7 @@ def evaluate_by_class(
     nll_per_label: dict[int, float] | None = None,
     nll_from_generated_kde: bool = False,
     seed: int = 42,
+    max_metric_samples: int = cfg.MAX_METRIC_SAMPLES,
 ) -> dict[str, dict]:
     per_class: dict[str, dict[str, float]] = {}
     for label, class_name in enumerate(CLASS_NAMES):
@@ -28,36 +44,63 @@ def evaluate_by_class(
         if nll_per_label is not None and label in nll_per_label:
             nll = nll_per_label[label]
         elif nll_from_generated_kde:
-            nll = negative_log_likelihood_kde_on_generated(real, fake, bandwidth=0.1 if label == 3 else 0.12)
+            nll = kde_nll_on_generated(label, real, fake)
         per_class[class_name] = compute_all_metrics(
             real,
             fake,
             nll=nll,
             include_mode_coverage=(label == 0),
             seed=seed + label,
+            max_metric_samples=max_metric_samples,
         )
     out = dict(per_class)
     out["macro_avg"] = macro_average(per_class)
     return out
 
 
+def save_metrics_bundle(
+    metrics_dir: Path,
+    all_metrics: dict,
+    table_rows: list[dict],
+    *,
+    json_name: str = "evaluation.json",
+    csv_name: str = "evaluation.csv",
+    alias_name: str | None = None,
+) -> Path:
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    json_path = metrics_dir / json_name
+    with json_path.open("w", encoding="utf-8") as f:
+        json.dump(all_metrics, f, indent=2)
+        f.write("\n")
+    if table_rows:
+        with (metrics_dir / csv_name).open("w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(table_rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(table_rows)
+    if alias_name:
+        shutil.copy2(json_path, metrics_dir / alias_name)
+    return json_path
+
+
 def evaluate_diffusion_checkpoint(
     checkpoint: str | Path,
     data_dir: str | Path,
     *,
+    split: str = "test",
     device: str = "cuda",
     seed: int = 42,
     save_figure: Path | None = None,
     save_samples_dir: Path | None = None,
 ) -> dict[str, dict]:
-    """加载 Diffusion checkpoint，在 test 上采样并返回按类 + macro 指标。"""
     dataset = load_dataset(Path(data_dir))
-    test_x, test_y = dataset["test_x"], dataset["test_y"]
+    test_x, test_y = get_eval_split(dataset, split)
     counts = class_counts(test_y)
 
     model = ConditionalDiffusion2D.load(checkpoint, device=device)
     gen_x, gen_y = model.sample_from_counts(counts, seed=seed + 1)
-    result = evaluate_by_class(gen_x, gen_y, test_x, test_y, nll_from_generated_kde=True, seed=seed)
+    result = evaluate_by_class(
+        gen_x, gen_y, test_x, test_y, nll_from_generated_kde=True, seed=seed
+    )
 
     if save_samples_dir is not None:
         save_samples_dir = Path(save_samples_dir)

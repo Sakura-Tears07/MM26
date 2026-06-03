@@ -1,0 +1,16 @@
+{
+  "kde_checkpoint": "outputs/checkpoints/kde.pkl",
+  "gmm_checkpoint": "outputs/checkpoints/gmm.pkl",
+  "kde_best_bandwidth": {
+    "0": 0.05,
+    "1": 0.05,
+    "2": 0.05,
+    "3": 0.03
+  },
+  "gmm_best_components": {
+    "0": 8,
+    "1": 12,
+    "2": 12,
+    "3": 40
+  }
+}

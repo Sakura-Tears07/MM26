@@ -1,0 +1,50 @@
+{
+  "best_mmd": {
+    "trial": "trial_0011_bs32_lr1e-03_ns500_ema0.999_acc1_hd256",
+    "batch_size": 32,
+    "lr": 0.001,
+    "num_steps": 500,
+    "ema_decay": 0.999,
+    "accum_steps": 1,
+    "hidden_dim": 256,
+    "steps_per_epoch": 63,
+    "final_loss": 0.3118638003617525,
+    "mmd": 0.0002080724792423716,
+    "coverage": 0.9244999999999999,
+    "precision": 0.843875,
+    "spiral_precision": 0.6105,
+    "nll": 2.1371612593450493
+  },
+  "best_precision": {
+    "trial": "trial_0014_bs32_lr2e-03_ns200_ema0.999_acc1_hd384",
+    "batch_size": 32,
+    "lr": 0.002,
+    "num_steps": 200,
+    "ema_decay": 0.999,
+    "accum_steps": 1,
+    "hidden_dim": 384,
+    "steps_per_epoch": 63,
+    "final_loss": 0.4775228240787983,
+    "mmd": 0.0023143922103203707,
+    "coverage": 0.927125,
+    "precision": 0.8655,
+    "spiral_precision": 0.66,
+    "nll": 2.1322744416106985
+  },
+  "best_spiral_precision": {
+    "trial": "trial_0014_bs32_lr2e-03_ns200_ema0.999_acc1_hd384",
+    "batch_size": 32,
+    "lr": 0.002,
+    "num_steps": 200,
+    "ema_decay": 0.999,
+    "accum_steps": 1,
+    "hidden_dim": 384,
+    "steps_per_epoch": 63,
+    "final_loss": 0.4775228240787983,
+    "mmd": 0.0023143922103203707,
+    "coverage": 0.927125,
+    "precision": 0.8655,
+    "spiral_precision": 0.66,
+    "nll": 2.1322744416106985
+  }
+}

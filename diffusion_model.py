@@ -118,6 +118,8 @@ class DenoiseMLPLegacy(nn.Module):
 
 
 def detect_arch_version(state_dict: dict[str, torch.Tensor]) -> str:
+    if "in_proj.weight" in state_dict:
+        return "resfourier_v3"
     if "time_proj.weight" in state_dict:
         return "sinusoidal_v2"
     if "time_embed.weight" in state_dict:
@@ -146,10 +148,99 @@ def build_denoiser(
             class_emb_dim=config.class_emb_dim,
             max_steps=config.num_steps,
         )
+    if arch_version == "resfourier_v3":
+        return DenoiseMLPResFourier(
+            num_classes=num_classes,
+            hidden_dim=config.hidden_dim,
+            time_emb_dim=config.time_emb_dim,
+            class_emb_dim=config.class_emb_dim,
+            max_steps=config.num_steps,
+            fourier_freqs=config.fourier_freqs,
+            num_res_blocks=config.num_res_blocks,
+        )
     raise ValueError(f"未知 arch_version: {arch_version}")
 
 
 SPIRAL_LABEL = 3
+
+
+def make_beta_schedule(
+    num_steps: int,
+    schedule: str,
+    *,
+    beta_start: float = 1e-4,
+    beta_end: float = 2e-2,
+    device: torch.device | str = "cpu",
+) -> torch.Tensor:
+    """训练与采样共用的 beta 序列。"""
+    if schedule == "linear":
+        return torch.linspace(beta_start, beta_end, num_steps, dtype=torch.float32, device=device)
+
+    if schedule == "cosine":
+        s = 0.008
+        steps = torch.arange(num_steps + 1, dtype=torch.float32, device=device)
+        f = torch.cos(((steps / num_steps) + s) / (1.0 + s) * math.pi * 2.0) ** 2
+        alpha_bar = f / f[0]
+        betas = 1.0 - alpha_bar[1:] / alpha_bar[:-1]
+        return betas.clamp(1e-5, 0.999)
+
+    raise ValueError(f"未知 noise schedule: {schedule!r}")
+
+
+def fourier_features(x: torch.Tensor, num_freqs: int = 4) -> torch.Tensor:
+    freqs = 2.0 ** torch.arange(num_freqs, device=x.device, dtype=x.dtype)
+    xb = x[..., None] * freqs
+    xb = xb.reshape(x.shape[0], -1)
+    return torch.cat([torch.sin(math.pi * xb), torch.cos(math.pi * xb)], dim=-1)
+
+
+class ResBlock(nn.Module):
+    def __init__(self, dim: int) -> None:
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.LayerNorm(dim),
+            nn.Linear(dim, dim),
+            nn.SiLU(),
+            nn.Linear(dim, dim),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x + self.net(x)
+
+
+class DenoiseMLPResFourier(nn.Module):
+    """残差 MLP + 坐标 Fourier 特征（默认新训练结构）。"""
+
+    arch_version = "resfourier_v3"
+
+    def __init__(
+        self,
+        num_classes: int = 4,
+        hidden_dim: int = 256,
+        time_emb_dim: int = 64,
+        class_emb_dim: int = 32,
+        max_steps: int = 200,
+        fourier_freqs: int = 4,
+        num_res_blocks: int = 4,
+    ) -> None:
+        super().__init__()
+        self.fourier_freqs = fourier_freqs
+        self.time_embed = SinusoidalTimeEmbedding(time_emb_dim, max_steps=max_steps)
+        self.time_proj = nn.Linear(time_emb_dim, time_emb_dim)
+        self.class_embed = nn.Embedding(num_classes, class_emb_dim)
+        x_in_dim = 2 + 2 * 2 * fourier_freqs
+        in_dim = x_in_dim + time_emb_dim + class_emb_dim
+        self.in_proj = nn.Linear(in_dim, hidden_dim)
+        self.blocks = nn.Sequential(*[ResBlock(hidden_dim) for _ in range(num_res_blocks)])
+        self.out = nn.Linear(hidden_dim, 2)
+
+    def forward(self, x_t: torch.Tensor, t: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        x_feat = torch.cat([x_t, fourier_features(x_t, self.fourier_freqs)], dim=-1)
+        t_emb = self.time_proj(self.time_embed(t))
+        y_emb = self.class_embed(y)
+        h = self.in_proj(torch.cat([x_feat, t_emb, y_emb], dim=-1))
+        h = self.blocks(h)
+        return self.out(h)
 
 
 @dataclass
@@ -160,7 +251,11 @@ class DiffusionConfig:
     hidden_dim: int = 256
     time_emb_dim: int = 64
     class_emb_dim: int = 32
-    # 螺旋采样时用更密的去噪步数（仅推理，不重新训练）
+    arch_version: str = "resfourier_v3"
+    noise_schedule: str = "cosine"
+    use_posterior_var: bool = True
+    fourier_freqs: int = 4
+    num_res_blocks: int = 4
     spiral_sample_step_mult: float = 2.0
 
 
@@ -170,16 +265,21 @@ class ConditionalDiffusion2D:
         self.device = torch.device(device)
         self.num_classes = num_classes
         self.norm_mode = "per_class"
-        self.arch_version = DenoiseMLP.arch_version
+        self.arch_version = config.arch_version
         self.model = build_denoiser(self.arch_version, num_classes, config).to(self.device)
 
-        betas = torch.linspace(config.beta_start, config.beta_end, config.num_steps, dtype=torch.float32)
+        betas = make_beta_schedule(
+            config.num_steps,
+            getattr(config, "noise_schedule", "linear"),
+            beta_start=config.beta_start,
+            beta_end=config.beta_end,
+            device=self.device,
+        )
         alphas = 1.0 - betas
         alpha_bars = torch.cumprod(alphas, dim=0)
-
-        self.betas = betas.to(self.device)
-        self.alphas = alphas.to(self.device)
-        self.alpha_bars = alpha_bars.to(self.device)
+        self.betas = betas
+        self.alphas = alphas
+        self.alpha_bars = alpha_bars
 
         # 兼容旧 checkpoint 的全局统计量
         self.x_mean = torch.zeros(2, dtype=torch.float32, device=self.device)
@@ -257,11 +357,11 @@ class ConditionalDiffusion2D:
         return losses
 
     def _schedule_for_steps(self, num_steps: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        betas = torch.linspace(
-            self.config.beta_start,
-            self.config.beta_end,
+        betas = make_beta_schedule(
             num_steps,
-            dtype=torch.float32,
+            getattr(self.config, "noise_schedule", "linear"),
+            beta_start=self.config.beta_start,
+            beta_end=self.config.beta_end,
             device=self.device,
         )
         alphas = 1.0 - betas
@@ -302,7 +402,13 @@ class ConditionalDiffusion2D:
 
             if t_idx > 0:
                 z = torch.randn(x.shape, generator=g, device=self.device)
-                x = mean + torch.sqrt(beta_t) * z
+                if getattr(self.config, "use_posterior_var", True):
+                    alpha_bar_prev = alpha_bars[t_idx - 1]
+                    posterior_var = beta_t * (1.0 - alpha_bar_prev) / (1.0 - alpha_bar_t)
+                    posterior_var = posterior_var.clamp(min=1e-20)
+                    x = mean + torch.sqrt(posterior_var) * z
+                else:
+                    x = mean + torch.sqrt(beta_t) * z
             else:
                 x = mean
 
@@ -331,7 +437,7 @@ class ConditionalDiffusion2D:
         payload = {
             "config": vars(self.config),
             "num_classes": self.num_classes,
-            "arch_version": getattr(self.model, "arch_version", DenoiseMLP.arch_version),
+            "arch_version": getattr(self.model, "arch_version", self.config.arch_version),
             "norm_mode": self.norm_mode,
             "state_dict": self.model.state_dict(),
             "class_mean": self.class_mean.detach().cpu().numpy().tolist(),
@@ -345,8 +451,16 @@ class ConditionalDiffusion2D:
     @staticmethod
     def load(checkpoint_path: str | Path, device: str = "cpu") -> "ConditionalDiffusion2D":
         payload = torch.load(Path(checkpoint_path), map_location=device, weights_only=False)
-        config = DiffusionConfig(**payload["config"])
-        arch_version = payload.get("arch_version") or detect_arch_version(payload["state_dict"])
+        raw_cfg = dict(payload["config"])
+        raw_cfg.setdefault("noise_schedule", "linear")
+        raw_cfg.setdefault("use_posterior_var", True)
+        raw_cfg.setdefault("fourier_freqs", 4)
+        raw_cfg.setdefault("num_res_blocks", 4)
+        arch_version = payload.get("arch_version") or raw_cfg.get("arch_version") or detect_arch_version(
+            payload["state_dict"]
+        )
+        raw_cfg["arch_version"] = arch_version
+        config = DiffusionConfig(**{k: v for k, v in raw_cfg.items() if k in DiffusionConfig.__dataclass_fields__})
         model = ConditionalDiffusion2D(
             config=config,
             num_classes=payload["num_classes"],

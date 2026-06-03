@@ -1,0 +1,18 @@
+{
+  "diffusion_checkpoint": "/home/lhr/my_stuff/MM26/outputs/ext_robustness/ratio_0p050/outputs/checkpoints/diffusion.pt",
+  "epochs": 400,
+  "batch_size_per_gpu": 32,
+  "world_size": 8,
+  "effective_batch_size": 256,
+  "steps_per_epoch": 63,
+  "accum_steps": 1,
+  "lr": 0.001,
+  "num_steps": 300,
+  "precision": "bf16",
+  "ema_decay": 0.999,
+  "warmup_epochs": 30,
+  "norm_mode": "per_class",
+  "hidden_dim": 256,
+  "class_emb_dim": 32,
+  "final_loss": 0.3997129861116409
+}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""主实验：训练 KDE / GMM / Diffusion → 采样 → 指标评估。"""
+"""主实验：train.py baselines + diffusion → evaluate.py（test + hidden_test）。"""
 from __future__ import annotations
 
 import argparse
@@ -19,7 +19,12 @@ def run(cmd: list[str], cwd: Path) -> None:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Main experiment pipeline.")
     p.add_argument("--data-dir", type=Path, default=cfg.DATA_DIR)
-    p.add_argument("--output-dir", type=Path, default=cfg.OUTPUT_DIR)
+    p.add_argument(
+        "--output-dir",
+        type=Path,
+        default=cfg.OUTPUT_DIR,
+        help=f"固定为 {cfg.OUTPUT_DIR}，勿在仓库根另建 outputs_*",
+    )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--epochs", type=int, default=cfg.DIFFUSION_EPOCHS)
     p.add_argument("--batch-size", type=int, default=cfg.DIFFUSION_BATCH_SIZE)
@@ -29,11 +34,18 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--class-emb-dim", type=int, default=cfg.DIFFUSION_CLASS_EMB_DIM)
     p.add_argument("--gpus", type=int, default=8)
     p.add_argument("--device", type=str, default="cuda")
-    p.add_argument("--force", action="store_true", help="重训并覆盖 output-dir 下已有 checkpoint / metrics / samples")
+    p.add_argument("--force", action="store_true")
     p.add_argument("--skip-train", action="store_true")
     p.add_argument("--eval-only", action="store_true")
     p.add_argument("--no-figures", action="store_true")
     p.add_argument("--compile", action="store_true")
+    p.add_argument(
+        "--split",
+        type=str,
+        nargs="+",
+        default=["test", "hidden_test"],
+        choices=["test", "hidden_test"],
+    )
     return p.parse_args()
 
 
@@ -41,17 +53,18 @@ def main() -> None:
     args = parse_args()
     root = Path(__file__).resolve().parent
     py = sys.executable
+    train_py = str(root / "train.py")
 
     skip_train = args.skip_train and not args.force
     eval_only = args.eval_only and not args.force
     if not eval_only and not skip_train:
         run(
-            [py, "train_baselines.py", "--data-dir", str(args.data_dir), "--output-dir", str(args.output_dir), "--seed", str(args.seed)],
+            [py, train_py, "baselines", "--data-dir", str(args.data_dir), "--output-dir", str(args.output_dir), "--seed", str(args.seed)],
             cwd=root,
         )
-        diff_cmd = [
-            py,
-            "train_diffusion.py",
+        diff_tail = [
+            train_py,
+            "diffusion",
             "--data-dir",
             str(args.data_dir),
             "--output-dir",
@@ -73,9 +86,9 @@ def main() -> None:
             "--device",
             args.device,
             "--precision",
-            "bf16",
+            cfg.DIFFUSION_PRECISION,
             "--num-workers",
-            "8",
+            str(cfg.DIFFUSION_NUM_WORKERS),
             "--warmup-epochs",
             str(cfg.DIFFUSION_WARMUP_EPOCHS),
             "--ema-decay",
@@ -84,14 +97,16 @@ def main() -> None:
             str(cfg.DIFFUSION_GRAD_CLIP),
         ]
         if args.compile:
-            diff_cmd.append("--compile")
+            diff_tail.append("--compile")
         if args.gpus > 1:
-            diff_cmd = ["torchrun", "--standalone", "--nproc_per_node", str(args.gpus), *diff_cmd[1:]]
+            diff_cmd = ["torchrun", "--standalone", "--nproc_per_node", str(args.gpus), *diff_tail]
+        else:
+            diff_cmd = [py, *diff_tail]
         run(diff_cmd, cwd=root)
 
     eval_cmd = [
         py,
-        "eval_main.py",
+        str(root / "evaluate.py"),
         "--data-dir",
         str(args.data_dir),
         "--output-dir",
@@ -100,11 +115,13 @@ def main() -> None:
         str(args.seed),
         "--device",
         args.device,
+        "--split",
+        *args.split,
     ]
     if args.no_figures:
         eval_cmd.append("--no-figures")
     run(eval_cmd, cwd=root)
-    log(f"主实验完成。指标: {args.output_dir / 'metrics' / 'evaluation.json'}")
+    log(f"主实验完成 → {args.output_dir / 'metrics' / cfg.ALIAS_MAIN_EVAL}")
 
 
 if __name__ == "__main__":
