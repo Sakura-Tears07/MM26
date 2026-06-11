@@ -1,0 +1,8 @@
+{
+  "batch_sizes": [32],
+  "lrs": [0.0005, 0.001, 0.002],
+  "num_steps_list": [200, 300, 500],
+  "ema_decays": [0.999],
+  "accum_steps_list": [1],
+  "hidden_dims": [256, 384]
+}

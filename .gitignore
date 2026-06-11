@@ -1,0 +1,17 @@
+__pycache__/
+.cache/
+cache/
+*.cache
+*.py[cod]
+*$py.class
+.DS_Store
+*.egg-info/
+.venv/
+
+# 主实验产物 outputs/ 已纳入版本库；勿提交临时目录与日志
+outputs_v2/
+outputs_spiral/
+*.log
+data/*.npy
+data/figures/
+data/preview.png
