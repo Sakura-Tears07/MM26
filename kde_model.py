@@ -7,6 +7,8 @@ from pathlib import Path
 import numpy as np
 from sklearn.neighbors import KernelDensity
 
+from data_utils import ClassNormStats
+
 
 SPIRAL_LABEL = 3
 
@@ -23,6 +25,7 @@ class KDEPerClass:
     )
     models: dict[int, KernelDensity] = field(default_factory=dict)
     best_bandwidth: dict[int, float] = field(default_factory=dict)
+    norm_stats: ClassNormStats | None = None
 
     def _bandwidths_for_label(self, label: int | None) -> list[float]:
         if label is not None and label in self.class_bandwidth_candidates:
@@ -45,12 +48,23 @@ class KDEPerClass:
         assert best_model is not None and best_bw is not None
         return best_model, best_bw
 
-    def fit(self, x: np.ndarray, y: np.ndarray) -> None:
+    def fit(
+        self,
+        x: np.ndarray,
+        y: np.ndarray,
+        *,
+        norm_stats: ClassNormStats | None = None,
+    ) -> None:
+        """在（可选）按类归一化后的坐标上拟合 KDE。"""
         self.models.clear()
         self.best_bandwidth.clear()
+        self.norm_stats = norm_stats
+        x_fit = x
+        if norm_stats is not None:
+            x_fit = norm_stats.normalize(x, y)
         labels = np.unique(y)
         for label in labels:
-            class_x = x[y == label]
+            class_x = x_fit[y == label]
             model, bw = self._fit_one_class(class_x, label=int(label))
             self.models[int(label)] = model
             self.best_bandwidth[int(label)] = float(bw)
@@ -58,7 +72,10 @@ class KDEPerClass:
     def sample_by_label(self, label: int, n_samples: int, seed: int = 0) -> np.ndarray:
         if label not in self.models:
             raise KeyError(f"Label {label} not found in KDE models")
-        return self.models[label].sample(n_samples=n_samples, random_state=seed).astype(np.float32)
+        samples = self.models[label].sample(n_samples=n_samples, random_state=seed).astype(np.float32)
+        if self.norm_stats is not None:
+            samples = self.norm_stats.denormalize_by_label(samples, label)
+        return samples
 
     def sample_from_counts(self, counts: dict[int, int], seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
         xs = []
@@ -82,10 +99,13 @@ class KDEPerClass:
             pickle.dump(self, f)
 
     def negative_log_likelihood(self, x: np.ndarray, y: np.ndarray) -> float:
+        x_eval = x
+        if self.norm_stats is not None:
+            x_eval = self.norm_stats.normalize(x, y)
         nlls: list[float] = []
         for label in np.unique(y):
             mask = y == label
-            pts = np.asarray(x[mask], dtype=np.float64)
+            pts = np.asarray(x_eval[mask], dtype=np.float64)
             if len(pts) == 0:
                 continue
             lp = self.models[int(label)].score_samples(pts)

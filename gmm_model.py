@@ -7,6 +7,8 @@ from pathlib import Path
 import numpy as np
 from sklearn.mixture import GaussianMixture
 
+from data_utils import ClassNormStats
+
 
 SPIRAL_LABEL = 3
 
@@ -14,10 +16,9 @@ SPIRAL_LABEL = 3
 @dataclass
 class GMMPerClass:
     component_candidates: list[int] = field(default_factory=lambda: [1, 2, 4, 6, 8, 10, 12])
-    # 螺旋为 1D 流形，需要更多椭球分量才能沿曲线铺展
     class_component_candidates: dict[int, list[int]] = field(
         default_factory=lambda: {
-            SPIRAL_LABEL: [12, 16, 20, 24, 28, 32, 36, 40],
+            SPIRAL_LABEL: [12, 16, 20, 24, 28, 32, 36, 40, 48],
         }
     )
     class_reg_covar: dict[int, float] = field(
@@ -28,6 +29,7 @@ class GMMPerClass:
     random_state: int = 42
     models: dict[int, GaussianMixture] = field(default_factory=dict)
     best_components: dict[int, int] = field(default_factory=dict)
+    norm_stats: ClassNormStats | None = None
 
     def _candidates_for_label(self, label: int | None) -> list[int]:
         if label is not None and label in self.class_component_candidates:
@@ -66,7 +68,6 @@ class GMMPerClass:
                 best_k = k
                 best_model = model
         if best_model is None:
-            # 最后兜底：单分量 + 更强正则
             model = GaussianMixture(
                 n_components=1,
                 covariance_type=self.covariance_type,
@@ -77,12 +78,23 @@ class GMMPerClass:
             return model, 1
         return best_model, int(best_k)
 
-    def fit(self, x: np.ndarray, y: np.ndarray, verbose: bool = False) -> None:
+    def fit(
+        self,
+        x: np.ndarray,
+        y: np.ndarray,
+        *,
+        norm_stats: ClassNormStats | None = None,
+        verbose: bool = False,
+    ) -> None:
         self.models.clear()
         self.best_components.clear()
+        self.norm_stats = norm_stats
+        x_fit = x
+        if norm_stats is not None:
+            x_fit = norm_stats.normalize(x, y)
         labels = np.unique(y)
         for label in labels:
-            class_x = x[y == label]
+            class_x = x_fit[y == label]
             if verbose:
                 print(f"[GMM] 拟合类别 {label}, n={len(class_x)}", flush=True)
             model, k = self._fit_one_class(class_x, label=int(label))
@@ -95,7 +107,10 @@ class GMMPerClass:
         if label not in self.models:
             raise KeyError(f"Label {label} not found in GMM models")
         x, _ = self.models[label].sample(n_samples=n_samples)
-        return x.astype(np.float32)
+        samples = x.astype(np.float32)
+        if self.norm_stats is not None:
+            samples = self.norm_stats.denormalize_by_label(samples, label)
+        return samples
 
     def sample_from_counts(self, counts: dict[int, int], seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
         xs = []
@@ -118,10 +133,13 @@ class GMMPerClass:
             pickle.dump(self, f)
 
     def negative_log_likelihood(self, x: np.ndarray, y: np.ndarray) -> float:
+        x_eval = x
+        if self.norm_stats is not None:
+            x_eval = self.norm_stats.normalize(x, y)
         nlls: list[float] = []
         for label in np.unique(y):
             mask = y == label
-            pts = np.asarray(x[mask], dtype=np.float64)
+            pts = np.asarray(x_eval[mask], dtype=np.float64)
             if len(pts) == 0:
                 continue
             lp = self.models[int(label)].score_samples(pts)

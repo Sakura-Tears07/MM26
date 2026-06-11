@@ -144,6 +144,18 @@ def diffusion_train_cmd(py: str, args: argparse.Namespace, data_dir: Path, out_d
         str(ema),
         "--grad-clip",
         str(args.grad_clip),
+        "--arch",
+        getattr(args, "arch", cfg.DIFFUSION_ARCH),
+        "--noise-schedule",
+        getattr(args, "noise_schedule", cfg.DIFFUSION_NOISE_SCHEDULE),
+        "--fourier-freqs",
+        str(getattr(args, "fourier_freqs", cfg.DIFFUSION_FOURIER_FREQS)),
+        "--res-blocks",
+        str(getattr(args, "res_blocks", cfg.DIFFUSION_RES_BLOCKS)),
+        "--spiral-oversample",
+        str(getattr(args, "spiral_oversample", cfg.DIFFUSION_SPIRAL_OVERSAMPLE)),
+        "--spiral-loss-weight",
+        str(getattr(args, "spiral_loss_weight", cfg.DIFFUSION_SPIRAL_LOSS_WEIGHT)),
     ]
     if args.compile:
         tail.append("--compile")

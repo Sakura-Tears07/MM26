@@ -127,7 +127,10 @@ def run_split(
     np.save(sample_dir / f"kde_labels{suffix}.npy", kde_y)
 
     def kde_nll(label: int, _real: np.ndarray, _fake: np.ndarray) -> float:
-        pts = np.asarray(eval_x[eval_y == label], dtype=np.float64)
+        mask = eval_y == label
+        pts = np.asarray(eval_x[mask], dtype=np.float64)
+        if kde.norm_stats is not None:
+            pts = kde.norm_stats.normalize(pts, eval_y[mask])
         return float(-np.mean(kde.models[label].score_samples(pts)))
 
     all_metrics["kde"] = evaluate_model("kde", kde_x, kde_y, eval_x, eval_y, kde_nll)
@@ -140,7 +143,10 @@ def run_split(
     np.save(sample_dir / f"gmm_labels{suffix}.npy", gmm_y)
 
     def gmm_nll(label: int, _real: np.ndarray, _fake: np.ndarray) -> float:
-        pts = np.asarray(eval_x[eval_y == label], dtype=np.float64)
+        mask = eval_y == label
+        pts = np.asarray(eval_x[mask], dtype=np.float64)
+        if gmm.norm_stats is not None:
+            pts = gmm.norm_stats.normalize(pts, eval_y[mask])
         return float(-np.mean(gmm.models[label].score_samples(pts)))
 
     all_metrics["gmm"] = evaluate_model("gmm", gmm_x, gmm_y, eval_x, eval_y, gmm_nll)

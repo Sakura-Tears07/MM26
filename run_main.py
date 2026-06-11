@@ -95,6 +95,18 @@ def main() -> None:
             str(cfg.DIFFUSION_EMA_DECAY),
             "--grad-clip",
             str(cfg.DIFFUSION_GRAD_CLIP),
+            "--arch",
+            cfg.DIFFUSION_ARCH,
+            "--noise-schedule",
+            cfg.DIFFUSION_NOISE_SCHEDULE,
+            "--fourier-freqs",
+            str(cfg.DIFFUSION_FOURIER_FREQS),
+            "--res-blocks",
+            str(cfg.DIFFUSION_RES_BLOCKS),
+            "--spiral-oversample",
+            str(cfg.DIFFUSION_SPIRAL_OVERSAMPLE),
+            "--spiral-loss-weight",
+            str(cfg.DIFFUSION_SPIRAL_LOSS_WEIGHT),
         ]
         if args.compile:
             diff_tail.append("--compile")

@@ -1,6 +1,6 @@
 {
-  "kde_checkpoint": "/home/lhr/my_stuff/MM26/outputs/robustness/ratio_0p100/checkpoints/kde.pkl",
-  "gmm_checkpoint": "/home/lhr/my_stuff/MM26/outputs/robustness/ratio_0p100/checkpoints/gmm.pkl",
+  "kde_checkpoint": "/home/zy/my_stuff/MM26/MM26/outputs/robustness/ratio_0p100/checkpoints/kde.pkl",
+  "gmm_checkpoint": "/home/zy/my_stuff/MM26/MM26/outputs/robustness/ratio_0p100/checkpoints/gmm.pkl",
   "kde_best_bandwidth": {
     "0": 0.05,
     "1": 0.05,
@@ -9,14 +9,16 @@
   },
   "gmm_best_components": {
     "0": 10,
-    "1": 12,
-    "2": 12,
-    "3": 40
+    "1": 10,
+    "2": 8,
+    "3": 48
   },
   "class_names": [
     "gaussian_mixture",
     "ring",
     "two_moons",
     "spiral"
-  ]
+  ],
+  "train_spiral_oversample": 4,
+  "train_use_per_class_norm": true
 }

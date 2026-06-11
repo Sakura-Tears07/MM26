@@ -2,12 +2,97 @@ from __future__ import annotations
 
 import json
 import random
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
+import config as cfg
+
 
 CLASS_NAMES = ["gaussian_mixture", "ring", "two_moons", "spiral"]
+
+
+@dataclass
+class ClassNormStats:
+    """每类独立的 mean/std，形状均为 (num_classes, 2)。"""
+
+    mean: np.ndarray
+    std: np.ndarray
+
+    @classmethod
+    def from_arrays(cls, x: np.ndarray, y: np.ndarray, num_classes: int | None = None) -> ClassNormStats:
+        if num_classes is None:
+            num_classes = int(y.max()) + 1
+        mean = np.zeros((num_classes, 2), dtype=np.float32)
+        std = np.ones((num_classes, 2), dtype=np.float32)
+        for c in range(num_classes):
+            pts = x[y == c]
+            if len(pts) == 0:
+                continue
+            mean[c] = pts.mean(axis=0)
+            std[c] = np.clip(pts.std(axis=0), 1e-6, None)
+        return cls(mean=mean, std=std)
+
+    def normalize(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        out = x.astype(np.float32, copy=True)
+        for c in range(len(self.mean)):
+            mask = y == c
+            if not np.any(mask):
+                continue
+            out[mask] = (out[mask] - self.mean[c]) / self.std[c]
+        return out
+
+    def denormalize(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        out = x.astype(np.float32, copy=True)
+        for c in range(len(self.mean)):
+            mask = y == c
+            if not np.any(mask):
+                continue
+            out[mask] = out[mask] * self.std[c] + self.mean[c]
+        return out
+
+    def denormalize_by_label(self, x: np.ndarray, label: int) -> np.ndarray:
+        y = np.full(len(x), label, dtype=np.int64)
+        return self.denormalize(x, y)
+
+
+def compute_class_stats(
+    x: np.ndarray,
+    y: np.ndarray,
+    num_classes: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Numpy 版统计量，供 Diffusion 训练脚本使用。"""
+    stats = ClassNormStats.from_arrays(x, y, num_classes)
+    return stats.mean, stats.std
+
+
+def prepare_training_data(
+    train_x: np.ndarray,
+    train_y: np.ndarray,
+    *,
+    spiral_oversample: int = 1,
+    spiral_label: int = cfg.SPIRAL_LABEL,
+    use_per_class_norm: bool = True,
+) -> tuple[np.ndarray, np.ndarray, ClassNormStats | None]:
+    """统一训练数据：spiral 过采样 + 返回按类归一化统计量（不在此函数内归一化 x）。"""
+    x = train_x.astype(np.float32, copy=True)
+    y = train_y.astype(np.int64, copy=True)
+
+    if spiral_oversample > 1:
+        spiral_mask = y == spiral_label
+        extra_x = np.repeat(x[spiral_mask], spiral_oversample - 1, axis=0)
+        extra_y = np.repeat(y[spiral_mask], spiral_oversample - 1, axis=0)
+        x = np.concatenate([x, extra_x], axis=0)
+        y = np.concatenate([y, extra_y], axis=0)
+
+    norm_stats: ClassNormStats | None = None
+    if use_per_class_norm:
+        num_classes = int(y.max()) + 1
+        # 统计量基于过采样后的原始坐标；归一化由各模型训练时各自施加一次
+        norm_stats = ClassNormStats.from_arrays(x, y, num_classes)
+
+    return x, y, norm_stats
 
 
 def set_seed(seed: int) -> None:

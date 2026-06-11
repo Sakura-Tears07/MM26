@@ -12,22 +12,17 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 
 
+from data_utils import compute_class_stats as _compute_class_stats_np
+
+
 def compute_class_stats(
     x: np.ndarray,
     y: np.ndarray,
     num_classes: int,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """每类独立的 mean/std，形状均为 (num_classes, 2)。"""
-    mean = torch.zeros(num_classes, 2, dtype=torch.float32)
-    std = torch.ones(num_classes, 2, dtype=torch.float32)
-    for c in range(num_classes):
-        pts = x[y == c]
-        if len(pts) == 0:
-            continue
-        t = torch.from_numpy(pts.astype(np.float32))
-        mean[c] = t.mean(dim=0)
-        std[c] = t.std(dim=0).clamp(min=1e-6)
-    return mean, std
+    mean_np, std_np = _compute_class_stats_np(x, y, num_classes)
+    return torch.from_numpy(mean_np), torch.from_numpy(std_np)
 
 
 class SinusoidalTimeEmbedding(nn.Module):
@@ -118,6 +113,8 @@ class DenoiseMLPLegacy(nn.Module):
 
 
 def detect_arch_version(state_dict: dict[str, torch.Tensor]) -> str:
+    if any(k.startswith("blocks.0.cond.") for k in state_dict):
+        return "resfourier_v4"
     if "in_proj.weight" in state_dict:
         return "resfourier_v3"
     if "time_proj.weight" in state_dict:
@@ -150,6 +147,16 @@ def build_denoiser(
         )
     if arch_version == "resfourier_v3":
         return DenoiseMLPResFourier(
+            num_classes=num_classes,
+            hidden_dim=config.hidden_dim,
+            time_emb_dim=config.time_emb_dim,
+            class_emb_dim=config.class_emb_dim,
+            max_steps=config.num_steps,
+            fourier_freqs=config.fourier_freqs,
+            num_res_blocks=config.num_res_blocks,
+        )
+    if arch_version == "resfourier_v4":
+        return DenoiseResFourierV4(
             num_classes=num_classes,
             hidden_dim=config.hidden_dim,
             time_emb_dim=config.time_emb_dim,
@@ -208,8 +215,66 @@ class ResBlock(nn.Module):
         return x + self.net(x)
 
 
+class FiLMResBlock(nn.Module):
+    """FiLM 条件残差块：time/class 嵌入调制 LayerNorm + 两层 MLP。"""
+
+    def __init__(self, dim: int, cond_dim: int) -> None:
+        super().__init__()
+        self.norm = nn.LayerNorm(dim)
+        self.fc1 = nn.Linear(dim, dim)
+        self.fc2 = nn.Linear(dim, dim)
+        self.cond = nn.Linear(cond_dim, dim * 2)
+
+    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+        scale, shift = self.cond(cond).chunk(2, dim=-1)
+        h = self.norm(x) * (1.0 + scale) + shift
+        h = F.silu(self.fc1(h))
+        h = self.fc2(h)
+        return x + h
+
+
+class DenoiseResFourierV4(nn.Module):
+    """FiLM 条件 ResNet + 坐标 Fourier 特征（默认训练结构）。"""
+
+    arch_version = "resfourier_v4"
+
+    def __init__(
+        self,
+        num_classes: int = 4,
+        hidden_dim: int = 384,
+        time_emb_dim: int = 64,
+        class_emb_dim: int = 64,
+        max_steps: int = 500,
+        fourier_freqs: int = 6,
+        num_res_blocks: int = 6,
+    ) -> None:
+        super().__init__()
+        self.fourier_freqs = fourier_freqs
+        self.time_embed = SinusoidalTimeEmbedding(time_emb_dim, max_steps=max_steps)
+        self.time_proj = nn.Linear(time_emb_dim, time_emb_dim)
+        self.class_embed = nn.Embedding(num_classes, class_emb_dim)
+        cond_dim = time_emb_dim + class_emb_dim
+        x_in_dim = 2 + 2 * 2 * fourier_freqs
+        in_dim = x_in_dim + cond_dim
+        self.in_proj = nn.Linear(in_dim, hidden_dim)
+        self.blocks = nn.ModuleList(
+            [FiLMResBlock(hidden_dim, cond_dim) for _ in range(num_res_blocks)]
+        )
+        self.out = nn.Linear(hidden_dim, 2)
+
+    def forward(self, x_t: torch.Tensor, t: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        x_feat = torch.cat([x_t, fourier_features(x_t, self.fourier_freqs)], dim=-1)
+        t_emb = self.time_proj(self.time_embed(t))
+        y_emb = self.class_embed(y)
+        cond = torch.cat([t_emb, y_emb], dim=-1)
+        h = self.in_proj(torch.cat([x_feat, cond], dim=-1))
+        for block in self.blocks:
+            h = block(h, cond)
+        return self.out(h)
+
+
 class DenoiseMLPResFourier(nn.Module):
-    """残差 MLP + 坐标 Fourier 特征（默认新训练结构）。"""
+    """残差 MLP + 坐标 Fourier 特征（兼容旧 checkpoint）。"""
 
     arch_version = "resfourier_v3"
 
@@ -254,9 +319,10 @@ class DiffusionConfig:
     arch_version: str = "resfourier_v3"
     noise_schedule: str = "cosine"
     use_posterior_var: bool = True
-    fourier_freqs: int = 4
-    num_res_blocks: int = 4
-    spiral_sample_step_mult: float = 2.0
+    fourier_freqs: int = 6
+    num_res_blocks: int = 6
+    spiral_sample_step_mult: float = 3.0
+    max_sample_steps: int = 1000
 
 
 class ConditionalDiffusion2D:
@@ -370,8 +436,9 @@ class ConditionalDiffusion2D:
 
     def _sample_steps_for_label(self, label: int) -> int:
         base = self.config.num_steps
+        cap = int(getattr(self.config, "max_sample_steps", 1000))
         if int(label) == SPIRAL_LABEL:
-            return int(min(500, round(base * self.config.spiral_sample_step_mult)))
+            return int(min(cap, round(base * self.config.spiral_sample_step_mult)))
         return base
 
     @torch.no_grad()
@@ -454,8 +521,10 @@ class ConditionalDiffusion2D:
         raw_cfg = dict(payload["config"])
         raw_cfg.setdefault("noise_schedule", "linear")
         raw_cfg.setdefault("use_posterior_var", True)
-        raw_cfg.setdefault("fourier_freqs", 4)
-        raw_cfg.setdefault("num_res_blocks", 4)
+        raw_cfg.setdefault("fourier_freqs", 6)
+        raw_cfg.setdefault("num_res_blocks", 6)
+        raw_cfg.setdefault("spiral_sample_step_mult", 3.0)
+        raw_cfg.setdefault("max_sample_steps", 1000)
         arch_version = payload.get("arch_version") or raw_cfg.get("arch_version") or detect_arch_version(
             payload["state_dict"]
         )

@@ -50,7 +50,7 @@ def parse_args(argv: list[str] | None = None) -> tuple[str, argparse.Namespace]:
     p_diff.add_argument("--spiral-oversample", type=int, default=cfg.DIFFUSION_SPIRAL_OVERSAMPLE)
     p_diff.add_argument("--spiral-loss-weight", type=float, default=cfg.DIFFUSION_SPIRAL_LOSS_WEIGHT)
     p_diff.add_argument("--noise-schedule", type=str, default=cfg.DIFFUSION_NOISE_SCHEDULE, choices=["linear", "cosine"])
-    p_diff.add_argument("--arch", type=str, default=cfg.DIFFUSION_ARCH, choices=["sinusoidal_v2", "resfourier_v3"])
+    p_diff.add_argument("--arch", type=str, default=cfg.DIFFUSION_ARCH, choices=["sinusoidal_v2", "resfourier_v3", "resfourier_v4"])
     p_diff.add_argument("--fourier-freqs", type=int, default=cfg.DIFFUSION_FOURIER_FREQS)
     p_diff.add_argument("--res-blocks", type=int, default=cfg.DIFFUSION_RES_BLOCKS)
     p_diff.add_argument(
@@ -64,9 +64,7 @@ def parse_args(argv: list[str] | None = None) -> tuple[str, argparse.Namespace]:
 
 
 def train_baselines(args: argparse.Namespace) -> None:
-    import numpy as np
-
-    from data_utils import CLASS_NAMES, load_dataset, set_seed
+    from data_utils import CLASS_NAMES, load_dataset, prepare_training_data, set_seed
     from gmm_model import GMMPerClass
     from kde_model import KDEPerClass
     from progress import log
@@ -79,11 +77,19 @@ def train_baselines(args: argparse.Namespace) -> None:
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
     dataset = load_dataset(args.data_dir)
-    train_x, train_y = dataset["train_x"], dataset["train_y"]
-    log(f"训练基线 | train={train_x.shape}")
+    train_x, train_y, norm_stats = prepare_training_data(
+        dataset["train_x"],
+        dataset["train_y"],
+        spiral_oversample=cfg.TRAIN_SPIRAL_OVERSAMPLE,
+        use_per_class_norm=cfg.TRAIN_USE_PER_CLASS_NORM,
+    )
+    log(
+        f"训练基线 | train={train_x.shape} | per_class_norm={cfg.TRAIN_USE_PER_CLASS_NORM} | "
+        f"spiral_oversample={cfg.TRAIN_SPIRAL_OVERSAMPLE}"
+    )
 
     kde = KDEPerClass(bandwidth_candidates=list(args.kde_bandwidths))
-    kde.fit(train_x, train_y)
+    kde.fit(train_x, train_y, norm_stats=norm_stats)
     kde_path = ckpt_dir / "kde.pkl"
     kde.save(kde_path)
     log(f"KDE 完成，带宽={kde.best_bandwidth}")
@@ -93,7 +99,7 @@ def train_baselines(args: argparse.Namespace) -> None:
         reg_covar=args.gmm_reg_covar,
         random_state=args.seed,
     )
-    gmm.fit(train_x, train_y, verbose=True)
+    gmm.fit(train_x, train_y, norm_stats=norm_stats, verbose=True)
     gmm_path = ckpt_dir / "gmm.pkl"
     gmm.save(gmm_path)
 
@@ -103,6 +109,8 @@ def train_baselines(args: argparse.Namespace) -> None:
         "kde_best_bandwidth": kde.best_bandwidth,
         "gmm_best_components": gmm.best_components,
         "class_names": CLASS_NAMES,
+        "train_spiral_oversample": cfg.TRAIN_SPIRAL_OVERSAMPLE,
+        "train_use_per_class_norm": cfg.TRAIN_USE_PER_CLASS_NORM,
     }
     with (metrics_dir / "baseline_train_summary.json").open("w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
@@ -118,12 +126,11 @@ def train_diffusion(args: argparse.Namespace) -> None:
     from torch.nn.parallel import DistributedDataParallel as DDP
     from torch.utils.data import DataLoader, DistributedSampler, TensorDataset
 
-    from data_utils import load_dataset, set_seed
+    from data_utils import load_dataset, prepare_training_data, set_seed
     from diffusion_model import (
         ConditionalDiffusion2D,
         DiffusionConfig,
         build_denoiser,
-        compute_class_stats,
         make_beta_schedule,
     )
     from progress import ProgressTracker, log as prog_log
@@ -183,16 +190,18 @@ def train_diffusion(args: argparse.Namespace) -> None:
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
     dataset = load_dataset(args.data_dir)
-    train_x_np = dataset["train_x"].astype(np.float32)
-    train_y_np = dataset["train_y"].astype(np.int64)
-    if args.spiral_oversample > 1:
-        spiral_mask = train_y_np == cfg.SPIRAL_LABEL
-        extra_x = np.repeat(train_x_np[spiral_mask], args.spiral_oversample - 1, axis=0)
-        extra_y = np.repeat(train_y_np[spiral_mask], args.spiral_oversample - 1, axis=0)
-        train_x_np = np.concatenate([train_x_np, extra_x], axis=0)
-        train_y_np = np.concatenate([train_y_np, extra_y], axis=0)
-        if rank == 0:
-            log_rank(rank, f"SPIRAL 过采样 x{args.spiral_oversample}，训练集 -> {len(train_x_np)}")
+    train_x_np, train_y_np, _norm_stats = prepare_training_data(
+        dataset["train_x"],
+        dataset["train_y"],
+        spiral_oversample=args.spiral_oversample,
+        use_per_class_norm=True,
+    )
+    assert _norm_stats is not None
+    if rank == 0:
+        log_rank(
+            rank,
+            f"统一训练数据 | N={len(train_x_np)} spiral_oversample={args.spiral_oversample} per_class_norm=True",
+        )
     num_classes = int(train_y_np.max()) + 1
 
     config = DiffusionConfig(
@@ -207,6 +216,8 @@ def train_diffusion(args: argparse.Namespace) -> None:
         use_posterior_var=not args.no_posterior_var,
         fourier_freqs=args.fourier_freqs,
         num_res_blocks=args.res_blocks,
+        spiral_sample_step_mult=cfg.DIFFUSION_SPIRAL_SAMPLE_STEP_MULT,
+        max_sample_steps=cfg.DIFFUSION_MAX_SAMPLE_STEPS,
     )
     if rank == 0:
         log_rank(
@@ -217,9 +228,8 @@ def train_diffusion(args: argparse.Namespace) -> None:
 
     train_x_cpu = torch.from_numpy(train_x_np)
     train_y_cpu = torch.from_numpy(train_y_np)
-    class_mean, class_std = compute_class_stats(train_x_np, train_y_np, num_classes)
-    class_mean = class_mean.to(device)
-    class_std = class_std.to(device)
+    class_mean = torch.from_numpy(_norm_stats.mean).to(device)
+    class_std = torch.from_numpy(_norm_stats.std).to(device)
     if rank == 0:
         log_rank(rank, "按类归一化 (per-class normalization)")
 
@@ -377,6 +387,8 @@ def train_diffusion(args: argparse.Namespace) -> None:
             "weight_decay": cfg.DIFFUSION_WEIGHT_DECAY,
             "spiral_oversample": args.spiral_oversample,
             "spiral_loss_weight": args.spiral_loss_weight,
+            "spiral_sample_step_mult": config.spiral_sample_step_mult,
+            "max_sample_steps": config.max_sample_steps,
             "arch_version": config.arch_version,
             "fourier_freqs": config.fourier_freqs,
             "num_res_blocks": config.num_res_blocks,

@@ -58,21 +58,27 @@ MAX_METRIC_SAMPLES = 2000
 WASSERSTEIN_MAX_SAMPLES = 512
 
 # ---------------------------------------------------------------------------
+# 统一训练数据（三模型共用）
+# ---------------------------------------------------------------------------
+TRAIN_SPIRAL_OVERSAMPLE = 4
+TRAIN_USE_PER_CLASS_NORM = True
+
+# ---------------------------------------------------------------------------
 # 分布式训练默认 GPU 数（torchrun --nproc_per_node）
 # ---------------------------------------------------------------------------
 DEFAULT_GPUS = 4
 
 # ---------------------------------------------------------------------------
-# Diffusion 训练默认（spiral 过采样见 DIFFUSION_SPIRAL_OVERSAMPLE）
+# Diffusion 训练默认
 # ---------------------------------------------------------------------------
-DIFFUSION_EPOCHS = 400
+DIFFUSION_EPOCHS = 600
 DIFFUSION_BATCH_SIZE = 32
 DIFFUSION_LR = 1e-3
 DIFFUSION_NUM_STEPS = 500
-DIFFUSION_HIDDEN_DIM = 256
+DIFFUSION_HIDDEN_DIM = 384
 DIFFUSION_TIME_EMB_DIM = 64
-DIFFUSION_CLASS_EMB_DIM = 32
-DIFFUSION_WARMUP_EPOCHS = 30
+DIFFUSION_CLASS_EMB_DIM = 64
+DIFFUSION_WARMUP_EPOCHS = 40
 DIFFUSION_EMA_DECAY = 0.999
 DIFFUSION_GRAD_CLIP = 1.0
 DIFFUSION_WEIGHT_DECAY = 1e-4
@@ -82,12 +88,14 @@ DIFFUSION_NOISE_SCHEDULE = "cosine"
 DIFFUSION_PREDICTION_TARGET = "epsilon"
 DIFFUSION_PRECISION = "bf16"
 DIFFUSION_NUM_WORKERS = 8
-DIFFUSION_SPIRAL_OVERSAMPLE = 2
-DIFFUSION_SPIRAL_LOSS_WEIGHT = 2.0
-DIFFUSION_ARCH = "resfourier_v3"
-DIFFUSION_FOURIER_FREQS = 4
-DIFFUSION_RES_BLOCKS = 4
+DIFFUSION_SPIRAL_OVERSAMPLE = TRAIN_SPIRAL_OVERSAMPLE
+DIFFUSION_SPIRAL_LOSS_WEIGHT = 3.0
+DIFFUSION_ARCH = "resfourier_v4"
+DIFFUSION_FOURIER_FREQS = 6
+DIFFUSION_RES_BLOCKS = 6
 DIFFUSION_USE_POSTERIOR_VAR = True
+DIFFUSION_SPIRAL_SAMPLE_STEP_MULT = 3.0
+DIFFUSION_MAX_SAMPLE_STEPS = 1000
 
 # 基线
 KDE_BANDWIDTHS = [0.05, 0.08, 0.12, 0.18, 0.25, 0.35]

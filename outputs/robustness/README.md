@@ -1,7 +1,14 @@
 # 鲁棒性实验说明
 
-`ratio_0p000/` 直接复用主实验 `outputs/checkpoints/`（**改进版 Diffusion**）。
+向训练集注入比例 `ratio ∈ {0, 1%, 5%, 10%}` 的均匀异常点（默认范围 `[-8,8]²`），分别重训 KDE / GMM / Diffusion 并评估。
 
-`ratio > 0` 时在污染训练集上重训 KDE/GMM/Diffusion；Diffusion 使用 `config.py` 改进默认（cosine、`resfourier_v3`、spiral 过采样等）。
+- `ratio_0p000/`：复用主实验 checkpoint（`ratio=0` 时不重训）。
+- `ratio > 0`：在污染数据上重训三模型；Diffusion 使用 `config.py` 当前默认（v4 + 统一数据管线）。
 
-若目录内 Diffusion spiral precision 仍约 **0.62**，说明未用改进 checkpoint 或未 `--force` 重跑。
+汇总：`summary.json`、`summary_macro.csv`。
+
+**须在主实验 `outputs/checkpoints/diffusion.pt` 更新后** 执行：
+
+```bash
+python extensions.py robustness --force --ratios 0 0.01 0.05 0.1 --gpus 4 --device cuda --compile
+```
